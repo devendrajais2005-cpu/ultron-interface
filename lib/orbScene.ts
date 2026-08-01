@@ -621,3 +621,238 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
       opacity: 0,
       blending: THREE.AdditiveBlending,
       side: THREE.D
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = Math.PI / 2;
+    return mesh;
+  }
+
+  const scanRing1 = makeScanRing(R1, 0.01);
+  const scanRing2 = makeScanRing(R1 * 0.7, 0.008);
+  orbGroup.add(scanRing1, scanRing2);
+
+  // ═══════════════════════════════════════════════
+  // HEXAGONAL NODES — small tech details
+  // ═══════════════════════════════════════════════
+  for (let i = 0; i < 15; i++) {
+    const phi = Math.acos(2 * Math.random() - 1);
+    const theta = Math.random() * Math.PI * 2;
+    const r = R1 + 0.02;
+    const hexGeo = new THREE.CircleGeometry(0.03 + Math.random() * 0.02, 6);
+    const hexEdges = new THREE.EdgesGeometry(hexGeo);
+    const hex = new THREE.LineSegments(hexEdges, lineMat(C_MID, 0.5));
+    hex.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.cos(phi),
+      r * Math.sin(phi) * Math.sin(theta),
+    );
+    hex.lookAt(0, 0, 0);
+    outerShell.add(hex);
+  }
+
+  // ═══════════════════════════════════════════════
+  // GESTURE / PROGRAMMATIC CAMERA CONTROL
+  // ═══════════════════════════════════════════════
+  const sphericalScratch = new THREE.Spherical();
+  const offsetScratch = new THREE.Vector3();
+
+  function rotateBy(deltaTheta: number, deltaPhi: number) {
+    offsetScratch.copy(camera.position).sub(controls.target);
+    sphericalScratch.setFromVector3(offsetScratch);
+    sphericalScratch.theta -= deltaTheta;
+    sphericalScratch.phi = THREE.MathUtils.clamp(
+      sphericalScratch.phi - deltaPhi,
+      0.05,
+      Math.PI - 0.05,
+    );
+    sphericalScratch.makeSafe();
+    offsetScratch.setFromSpherical(sphericalScratch);
+    camera.position.copy(controls.target).add(offsetScratch);
+    camera.lookAt(controls.target);
+  }
+
+  function zoomBy(factor: number) {
+    offsetScratch.copy(camera.position).sub(controls.target);
+    const dist = THREE.MathUtils.clamp(
+      offsetScratch.length() * factor,
+      MIN_DISTANCE,
+      MAX_DISTANCE,
+    );
+    offsetScratch.setLength(dist);
+    camera.position.copy(controls.target).add(offsetScratch);
+  }
+
+  function resetView() {
+    camera.position.copy(HOME_POSITION);
+    controls.target.set(0, 0, 0);
+    camera.lookAt(controls.target);
+    controls.update();
+  }
+
+  // ═══════════════════════════════════════════════
+  // ANIMATION
+  // ═══════════════════════════════════════════════
+  const clock = new THREE.Clock();
+  let flickerTimer = 0;
+  let rafId = 0;
+  let disposed = false;
+
+  function animate() {
+    if (disposed) return;
+    rafId = requestAnimationFrame(animate);
+    const t = clock.getElapsedTime();
+
+    // Outer shell rotation
+    outerShell.rotation.y += 0.0015;
+    outerShell.rotation.x = Math.sin(t * 0.08) * 0.05;
+
+    // Panel group follows shell but with slight offset
+    panelGroup.rotation.y += 0.0018;
+    panelGroup.rotation.x = Math.sin(t * 0.08 + 0.5) * 0.04;
+
+    // Secondary shell counter-rotates slowly
+    shell2.rotation.y -= 0.001;
+    shell2.rotation.z = Math.sin(t * 0.12) * 0.03;
+
+    // Inner core — opposite, faster
+    innerCore.rotation.y -= 0.005;
+    innerCore.rotation.z += 0.002;
+    innerCore.rotation.x = Math.cos(t * 0.1) * 0.08;
+
+    // Innermost wireframe
+    icoWire.rotation.x += 0.008;
+    icoWire.rotation.y += 0.012;
+
+    // Core pulse — dramatic surges but mostly transparent
+    const wave1 = Math.sin(t * 1.2);
+    const wave3 = Math.pow(Math.max(0, Math.sin(t * 0.4)), 5); // rare big surge
+    const wave4 = Math.pow(Math.max(0, Math.sin(t * 0.7 + 2)), 8); // mega surge
+    const fadeOut = Math.pow(Math.max(0, Math.sin(t * 0.25)), 3); // periodic full transparency
+    const surge = wave3 * 1.5 + wave4 * 2.0;
+    const coreScale = 1 + surge + Math.sin(t * 5) * 0.05;
+    coreSphere.scale.setScalar(coreScale);
+    // Opacity: mostly very low (0-0.15), sometimes fully transparent, brief bright on surge
+    const coreOpacity = Math.max(
+      0,
+      (0.08 + wave1 * 0.05 + surge * 0.2) * (1 - fadeOut * 0.95),
+    );
+    coreSphereMat.opacity = Math.min(0.6, coreOpacity);
+    glowSphere.scale.setScalar(1 + surge * 0.8);
+    glowSphereMat.opacity = Math.max(0, (0.03 + surge * 0.08) * (1 - fadeOut * 0.9));
+    // Icosahedron wireframe stays visible even when glow fades
+    icoWire.scale.setScalar(1 + surge * 0.6);
+    icoWireMat.opacity = Math.min(1, 0.5 + surge * 0.4);
+
+    // Debris orbits
+    debris.forEach((d) => {
+      const u = d.userData as DebrisOrbit;
+      const a = t * u.speed + u.phase;
+      d.position.set(
+        u.orbitR * Math.cos(a) * Math.cos(u.tiltX),
+        u.orbitR * Math.sin(u.tiltX) * Math.sin(a * 0.8) + Math.sin(a * 0.3 + u.tiltZ) * 0.2,
+        u.orbitR * Math.sin(a) * Math.cos(u.tiltZ),
+      );
+      d.rotation.x += 0.015;
+      d.rotation.z += 0.01;
+    });
+
+    // Text drift
+    const driftGroups: [THREE.Group, number][] = [
+      [textOuter, 1],
+      [textInner, 2],
+      [textAmbient, 1.2],
+    ];
+    for (const [group, mult] of driftGroups) {
+      group.children.forEach((sp) => {
+        const u = sp.userData as SpriteDrift;
+        u.theta += u.speed * mult;
+        sp.position.set(
+          u.r * Math.sin(u.phi) * Math.cos(u.theta),
+          u.r * Math.cos(u.phi),
+          u.r * Math.sin(u.phi) * Math.sin(u.theta),
+        );
+      });
+    }
+
+    // Scan rings sweeping
+    const scanY1 = Math.sin(t * 0.4) * R1;
+    scanRing1.position.y = scanY1;
+    const scanS1 = Math.sqrt(Math.max(0, R1 * R1 - scanY1 * scanY1)) / R1;
+    scanRing1.scale.set(scanS1, scanS1, 1);
+    (scanRing1.material as THREE.MeshBasicMaterial).opacity = 0.2 * scanS1;
+
+    const scanY2 = Math.sin(t * 0.6 + 2) * R3;
+    scanRing2.position.y = scanY2;
+    const scanS2 = Math.sqrt(Math.max(0, R3 * R3 - scanY2 * scanY2)) / R3;
+    scanRing2.scale.set(scanS2, scanS2, 1);
+    (scanRing2.material as THREE.MeshBasicMaterial).opacity = 0.15 * scanS2;
+
+    // Dust rotation
+    dustPoints.rotation.y += 0.0002;
+
+    // Random flicker on some panels
+    flickerTimer += 0.016;
+    if (flickerTimer > 0.1) {
+      flickerTimer = 0;
+      panelGroup.children.forEach((p) => {
+        if (Math.random() > 0.95) {
+          p.visible = !p.visible;
+        }
+      });
+    }
+
+    // Bloom pulse
+    bloom.strength = 1.6 + Math.sin(t * 0.8) * 0.3;
+
+    // Update chromatic aberration time
+    chromaticPass.uniforms.uTime.value = t;
+
+    controls.update();
+    composer.render();
+  }
+
+  animate();
+
+  // ——— RESIZE ———
+  function onResize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+    composer.setSize(w, h);
+  }
+  window.addEventListener("resize", onResize);
+
+  // ——— CLEANUP ———
+  function dispose() {
+    disposed = true;
+    cancelAnimationFrame(rafId);
+    window.removeEventListener("resize", onResize);
+    controls.dispose();
+    scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const anyMat = mat as THREE.Material & { map?: THREE.Texture };
+        anyMat.map?.dispose();
+        mat.dispose();
+      }
+    });
+    composer.dispose();
+    renderer.dispose();
+    renderer.domElement.remove();
+  }
+
+  return {
+    rotateBy,
+    zoomBy,
+    zoomIn: () => zoomBy(0.65),
+    zoomOut: () => zoomBy(1.55),
+    resetView,
+    dispose,
+  };
+}

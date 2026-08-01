@@ -620,7 +620,7 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
       transparent: true,
       opacity: 0,
       blending: THREE.AdditiveBlending,
-      side: THREE.D
+      side: THREE.DoubleSide,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geo, mat);

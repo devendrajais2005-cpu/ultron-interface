@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Use env var first; if not set (e.g. Vercel env not configured), fall back to hardcoded key.
+// Once GEMINI_API_KEY is set in Vercel Settings → Environment Variables, the hardcoded value
+// below can be safely removed.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "AIzaSyB8RN6IyzdkdiO0VUa9WcpE3WYI4U4fes1WW7RNU04gQEAWHmQ";
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -9,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = GEMINI_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
